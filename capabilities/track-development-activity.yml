@@ -1,0 +1,206 @@
+naftiko: "0.5"
+info:
+  label: "Track Development Activity"
+  description: "Measures PR velocity, issue resolution time, merge lead time, active days, and release cadence across a GitHub org. Maps to Health Score Pillar 3: Development (25%)."
+  tags:
+    - health-score
+    - development
+    - pillar-3
+  created: "2026-03-22"
+  modified: "2026-03-22"
+
+capability:
+  exposes:
+    - type: "mcp"
+      namespace: "health-score"
+      tools:
+        - name: "get-development-activity"
+          description: "Returns development activity metrics for a GitHub org: PRs merged per month, issue resolution time, merge lead time, active days, and release count. Use this to assess Pillar 3 of the Naftiko health score."
+          inputParameters:
+            - name: org
+              in: body
+              type: string
+            - name: since
+              in: body
+              type: string
+              description: "ISO date for measurement window start"
+            - name: until
+              in: body
+              type: string
+              description: "ISO date for measurement window end"
+          steps:
+            - name: list-repos
+              type: call
+              call: "github.list-org-repos"
+              with:
+                org: "{{org}}"
+                per_page: "100"
+                type: "public"
+            - name: get-merged-prs
+              type: call
+              call: "github.list-pull-requests"
+              with:
+                org: "{{org}}"
+                repos: "{{list-repos.items}}"
+                state: "closed"
+                per_page: "100"
+            - name: get-issues
+              type: call
+              call: "github.list-issues"
+              with:
+                org: "{{org}}"
+                repos: "{{list-repos.items}}"
+                state: "all"
+                since: "{{since}}"
+            - name: get-releases
+              type: call
+              call: "github.list-releases"
+              with:
+                org: "{{org}}"
+                repos: "{{list-repos.items}}"
+            - name: get-commits
+              type: call
+              call: "github.list-commits"
+              with:
+                org: "{{org}}"
+                repos: "{{list-repos.items}}"
+                since: "{{since}}"
+                until: "{{until}}"
+          outputParameters:
+            - name: prs_merged_per_month
+              type: number
+              mapping: "{{get-merged-prs.merged_count / months_in_range(since, until)}}"
+            - name: avg_issue_resolution_days
+              type: number
+              mapping: "{{get-issues.avg_resolution_days}}"
+            - name: avg_merge_lead_time_days
+              type: number
+              mapping: "{{get-merged-prs.avg_lead_time_days}}"
+            - name: active_days_last_30
+              type: number
+              mapping: "{{get-commits.unique_dates | length}}"
+            - name: release_count
+              type: number
+              mapping: "{{get-releases.total_count}}"
+            - name: external_pr_count
+              type: number
+              mapping: "{{get-merged-prs.external_count}}"
+            - name: pillar_score
+              type: number
+              mapping: "{{compute_pillar_3(prs_merged_per_month, avg_issue_resolution_days, avg_merge_lead_time_days, active_days_last_30, release_count)}}"
+
+  consumes:
+    - type: "http"
+      namespace: "github"
+      baseUri: "https://api.github.com"
+      authentication:
+        type: "bearer"
+        token: "{{github_token}}"
+      inputParameters:
+        - name: "github_token"
+          in: "environment"
+        - name: "Accept"
+          in: "header"
+          value: "application/vnd.github+json"
+        - name: "X-GitHub-Api-Version"
+          in: "header"
+          value: "2022-11-28"
+      resources:
+        - name: "org-repos"
+          label: "Organization Repositories"
+          path: "/orgs/{{org}}/repos"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "type"
+              in: "query"
+            - name: "per_page"
+              in: "query"
+          operations:
+            - name: "list-org-repos"
+              method: "GET"
+              outputParameters:
+                - name: "items"
+                  type: "array"
+                  value: "$"
+
+        - name: "repo-pulls"
+          label: "Repository Pull Requests"
+          path: "/repos/{{org}}/{{repo}}/pulls"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "repo"
+              in: "path"
+          operations:
+            - name: "list-pull-requests"
+              method: "GET"
+              inputParameters:
+                - name: "state"
+                  in: "query"
+                - name: "per_page"
+                  in: "query"
+              outputParameters:
+                - name: "items"
+                  type: "array"
+                  value: "$"
+
+        - name: "repo-issues"
+          label: "Repository Issues"
+          path: "/repos/{{org}}/{{repo}}/issues"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "repo"
+              in: "path"
+          operations:
+            - name: "list-issues"
+              method: "GET"
+              inputParameters:
+                - name: "state"
+                  in: "query"
+                - name: "since"
+                  in: "query"
+              outputParameters:
+                - name: "items"
+                  type: "array"
+                  value: "$"
+
+        - name: "repo-releases"
+          label: "Repository Releases"
+          path: "/repos/{{org}}/{{repo}}/releases"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "repo"
+              in: "path"
+          operations:
+            - name: "list-releases"
+              method: "GET"
+              outputParameters:
+                - name: "items"
+                  type: "array"
+                  value: "$"
+
+        - name: "repo-commits"
+          label: "Repository Commits"
+          path: "/repos/{{org}}/{{repo}}/commits"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "repo"
+              in: "path"
+          operations:
+            - name: "list-commits"
+              method: "GET"
+              inputParameters:
+                - name: "since"
+                  in: "query"
+                - name: "until"
+                  in: "query"
+                - name: "per_page"
+                  in: "query"
+              outputParameters:
+                - name: "commits"
+                  type: "array"
+                  value: "$"

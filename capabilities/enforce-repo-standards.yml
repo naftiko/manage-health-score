@@ -1,0 +1,111 @@
+naftiko: "0.5"
+info:
+  label: "Enforce Repo Standards"
+  description: "Scans a GitHub org for repos missing required governance and security files (LICENSE, CODE_OF_CONDUCT.md, SECURITY.md, CONTRIBUTING.md, CODEOWNERS, .github/dependabot.yml) and creates issues or PRs to add them. Directly addresses the Quick Wins from the health score roadmap."
+  tags:
+    - health-score
+    - security
+    - governance
+    - enforcement
+  created: "2026-03-22"
+  modified: "2026-03-22"
+
+capability:
+  exposes:
+    - type: "mcp"
+      namespace: "health-score"
+      tools:
+        - name: "enforce-repo-standards"
+          description: "Scans all repos in a GitHub org and creates issues for any missing required files: LICENSE (Apache 2.0), CODE_OF_CONDUCT.md, SECURITY.md, CONTRIBUTING.md, CODEOWNERS, and .github/dependabot.yml. Returns a summary of issues created per repo."
+          inputParameters:
+            - name: org
+              in: body
+              type: string
+            - name: dry_run
+              in: body
+              type: boolean
+              description: "If true, only report missing files without creating issues"
+          steps:
+            - name: audit
+              type: call
+              call: "health-score.audit-security-posture"
+              with:
+                org: "{{org}}"
+            - name: create-license-issues
+              type: call
+              call: "github.create-issue"
+              condition: "{{dry_run == false && audit.missing_files contains 'LICENSE'}}"
+              forEach: "{{audit.missing_files | where('file', 'LICENSE')}}"
+              with:
+                owner: "{{org}}"
+                repo: "{{item.repo}}"
+                title: "Add Apache 2.0 LICENSE file"
+                body: "This repository is missing a LICENSE file. Per Naftiko governance standards and CNCF Sandbox requirements, all repos must include an Apache 2.0 license.\n\nPriority: High\nHealth Score Impact: Security & Best Practices pillar"
+                labels: ["governance", "health-score"]
+            - name: create-coc-issues
+              type: call
+              call: "github.create-issue"
+              condition: "{{dry_run == false && audit.missing_files contains 'CODE_OF_CONDUCT.md'}}"
+              forEach: "{{audit.missing_files | where('file', 'CODE_OF_CONDUCT.md')}}"
+              with:
+                owner: "{{org}}"
+                repo: "{{item.repo}}"
+                title: "Add CODE_OF_CONDUCT.md referencing CNCF CoC"
+                body: "This repository is missing a Code of Conduct. Per CNCF requirements, all repos must reference the CNCF Code of Conduct.\n\nPriority: High\nHealth Score Impact: Security & Best Practices pillar"
+                labels: ["governance", "health-score"]
+            - name: create-security-issues
+              type: call
+              call: "github.create-issue"
+              condition: "{{dry_run == false && audit.missing_files contains 'SECURITY.md'}}"
+              forEach: "{{audit.missing_files | where('file', 'SECURITY.md')}}"
+              with:
+                owner: "{{org}}"
+                repo: "{{item.repo}}"
+                title: "Add SECURITY.md with responsible disclosure process"
+                body: "This repository is missing a security policy. A SECURITY.md with a responsible disclosure process is required for CNCF Sandbox and improves the health score Security pillar.\n\nPriority: High\nHealth Score Impact: Security & Best Practices pillar"
+                labels: ["security", "health-score"]
+            - name: create-contributing-issues
+              type: call
+              call: "github.create-issue"
+              condition: "{{dry_run == false && audit.missing_files contains 'CONTRIBUTING.md'}}"
+              forEach: "{{audit.missing_files | where('file', 'CONTRIBUTING.md')}}"
+              with:
+                owner: "{{org}}"
+                repo: "{{item.repo}}"
+                title: "Add CONTRIBUTING.md contributor guide"
+                body: "This repository is missing a contributor guide. CONTRIBUTING.md lowers the barrier for first-time contributors and is required for CNCF Sandbox.\n\nPriority: High\nHealth Score Impact: Contributors pillar + Security & Best Practices pillar"
+                labels: ["governance", "health-score"]
+            - name: create-dependabot-issues
+              type: call
+              call: "github.create-issue"
+              condition: "{{dry_run == false && audit.missing_files contains '.github/dependabot.yml'}}"
+              forEach: "{{audit.missing_files | where('file', '.github/dependabot.yml')}}"
+              with:
+                owner: "{{org}}"
+                repo: "{{item.repo}}"
+                title: "Enable Dependabot dependency scanning"
+                body: "This repository does not have Dependabot configured. Add .github/dependabot.yml to enable automated dependency scanning.\n\nPriority: Medium\nHealth Score Impact: Security & Best Practices pillar"
+                labels: ["security", "health-score"]
+          outputParameters:
+            - name: total_repos_scanned
+              type: number
+              mapping: "{{audit.total_repos}}"
+            - name: issues_created
+              type: number
+              mapping: "{{create-license-issues.count + create-coc-issues.count + create-security-issues.count + create-contributing-issues.count + create-dependabot-issues.count}}"
+            - name: missing_summary
+              type: object
+              mapping:
+                license: "{{audit.repos_with_license}} / {{audit.total_repos}}"
+                code_of_conduct: "{{audit.repos_with_coc}} / {{audit.total_repos}}"
+                security_md: "{{audit.repos_with_security_md}} / {{audit.total_repos}}"
+                contributing: "{{audit.repos_with_contributing}} / {{audit.total_repos}}"
+                dependabot: "{{audit.repos_with_dependabot}} / {{audit.total_repos}}"
+                codeowners: "{{audit.repos_with_codeowners}} / {{audit.total_repos}}"
+                branch_protection: "{{audit.repos_with_branch_protection}} / {{audit.total_repos}}"
+
+  consumes:
+    - import: "audit-security-posture.yml"
+      as: "security-audit"
+    - import: "shared-github.yml"
+      as: "github"

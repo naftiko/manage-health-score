@@ -1,0 +1,113 @@
+naftiko: "0.5"
+info:
+  label: "Report Health Score"
+  description: "Computes the full health score, writes the results to a Notion database page, and posts a summary digest to Slack. Designed for quarterly or monthly health score reporting."
+  tags:
+    - health-score
+    - reporting
+    - composite
+  created: "2026-03-22"
+  modified: "2026-03-22"
+
+capability:
+  exposes:
+    - type: "mcp"
+      namespace: "health-score"
+      tools:
+        - name: "report-health-score"
+          description: "Computes the Naftiko health score, creates a Notion page with pillar breakdowns, and posts a summary to Slack. Use for quarterly health score reporting."
+          inputParameters:
+            - name: org
+              in: body
+              type: string
+            - name: quarter
+              in: body
+              type: string
+            - name: since
+              in: body
+              type: string
+            - name: until
+              in: body
+              type: string
+            - name: linkedin_org_id
+              in: body
+              type: string
+            - name: notion_database_id
+              in: body
+              type: string
+              description: "Notion database for storing health score reports"
+            - name: slack_channel
+              in: body
+              type: string
+              description: "Slack channel for health score announcements"
+          steps:
+            - name: compute-score
+              type: call
+              call: "health-score.compute-health-score"
+              with:
+                org: "{{org}}"
+                quarter: "{{quarter}}"
+                since: "{{since}}"
+                until: "{{until}}"
+                linkedin_org_id: "{{linkedin_org_id}}"
+            - name: create-notion-report
+              type: call
+              call: "notion.create-page"
+              with:
+                parent:
+                  database_id: "{{notion_database_id}}"
+                properties:
+                  Name:
+                    title:
+                      - text:
+                          content: "Health Score Report — {{quarter}}"
+                  Score:
+                    number: "{{compute-score.overall_score}}"
+                  Quarter:
+                    select:
+                      name: "{{quarter}}"
+                children:
+                  - object: "heading_2"
+                    heading_2:
+                      rich_text:
+                        - text:
+                            content: "Overall Score: {{compute-score.overall_score}}/100"
+                  - object: "paragraph"
+                    paragraph:
+                      rich_text:
+                        - text:
+                            content: "Contributors (30%): {{compute-score.contributors_raw}} raw / {{compute-score.contributors_weighted}} weighted\nPopularity (20%): {{compute-score.popularity_raw}} raw / {{compute-score.popularity_weighted}} weighted\nDevelopment (25%): {{compute-score.development_raw}} raw / {{compute-score.development_weighted}} weighted\nSecurity (25%): {{compute-score.security_raw}} raw / {{compute-score.security_weighted}} weighted"
+                  - object: "heading_3"
+                    heading_3:
+                      rich_text:
+                        - text:
+                            content: "Key Metrics"
+                  - object: "paragraph"
+                    paragraph:
+                      rich_text:
+                        - text:
+                            content: "Stars: {{compute-score.pillar_details.popularity.total_stars}} | Forks: {{compute-score.pillar_details.popularity.total_forks}} | Contributors: {{compute-score.pillar_details.contributors.total_contributors}} | Orgs: {{compute-score.pillar_details.contributors.contributing_orgs}} | PRs/mo: {{compute-score.pillar_details.development.prs_per_month}} | Active Days: {{compute-score.pillar_details.development.active_days}} | Releases: {{compute-score.pillar_details.development.releases}}"
+            - name: post-slack-digest
+              type: call
+              call: "slack.post-message"
+              with:
+                channel: "{{slack_channel}}"
+                text: "Naftiko Health Score Report — {{quarter}}\n\nOverall: {{compute-score.overall_score}}/100\n\nContributors: {{compute-score.contributors_weighted}} pts | Popularity: {{compute-score.popularity_weighted}} pts | Development: {{compute-score.development_weighted}} pts | Security: {{compute-score.security_weighted}} pts\n\nFull report: {{create-notion-report.url}}"
+          outputParameters:
+            - name: overall_score
+              type: number
+              mapping: "{{compute-score.overall_score}}"
+            - name: notion_url
+              type: string
+              mapping: "{{create-notion-report.url}}"
+            - name: slack_ts
+              type: string
+              mapping: "{{post-slack-digest.ts}}"
+
+  consumes:
+    - import: "compute-health-score.yml"
+      as: "health-score-compute"
+    - import: "shared-notion.yml"
+      as: "notion"
+    - import: "shared-slack.yml"
+      as: "slack"

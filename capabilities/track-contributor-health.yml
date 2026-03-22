@@ -1,0 +1,144 @@
+naftiko: "0.5"
+info:
+  label: "Track Contributor Health"
+  description: "Queries GitHub org repos for contributor counts, org diversity, retention rate, and dependency metrics. Maps to Health Score Pillar 1: Contributors (30%)."
+  tags:
+    - health-score
+    - contributors
+    - pillar-1
+  created: "2026-03-22"
+  modified: "2026-03-22"
+
+capability:
+  exposes:
+    - type: "mcp"
+      namespace: "health-score"
+      tools:
+        - name: "get-contributor-health"
+          description: "Returns contributor health metrics for a GitHub org: total contributors, quarterly active contributors, top contributor concentration, and contributing organizations. Use this to assess Pillar 1 of the Naftiko health score."
+          inputParameters:
+            - name: org
+              in: body
+              type: string
+            - name: since
+              in: body
+              type: string
+              description: "ISO date for quarterly window start (e.g. 2026-01-01)"
+          steps:
+            - name: list-repos
+              type: call
+              call: "github.list-org-repos"
+              with:
+                org: "{{org}}"
+                per_page: "100"
+                type: "public"
+            - name: get-contributors
+              type: call
+              call: "github.list-repo-contributors"
+              with:
+                org: "{{org}}"
+                repos: "{{list-repos.items}}"
+            - name: get-commit-activity
+              type: call
+              call: "github.list-org-commits"
+              with:
+                org: "{{org}}"
+                since: "{{since}}"
+          outputParameters:
+            - name: total_contributors
+              type: number
+              mapping: "{{get-contributors.unique_count}}"
+            - name: quarterly_active_contributors
+              type: number
+              mapping: "{{get-commit-activity.unique_authors}}"
+            - name: top_contributor_pct
+              type: number
+              mapping: "{{get-contributors.top_contributor_pct}}"
+            - name: contributing_orgs
+              type: number
+              mapping: "{{get-contributors.unique_orgs}}"
+            - name: contributor_retention_rate
+              type: number
+              mapping: "{{get-commit-activity.retention_rate}}"
+            - name: pillar_score
+              type: number
+              mapping: "{{compute_pillar_1(total_contributors, quarterly_active_contributors, top_contributor_pct, contributing_orgs, contributor_retention_rate)}}"
+
+  consumes:
+    - type: "http"
+      namespace: "github"
+      baseUri: "https://api.github.com"
+      authentication:
+        type: "bearer"
+        token: "{{github_token}}"
+      inputParameters:
+        - name: "github_token"
+          in: "environment"
+        - name: "Accept"
+          in: "header"
+          value: "application/vnd.github+json"
+        - name: "X-GitHub-Api-Version"
+          in: "header"
+          value: "2022-11-28"
+      resources:
+        - name: "org-repos"
+          label: "Organization Repositories"
+          description: "List all repositories for a GitHub organization"
+          path: "/orgs/{{org}}/repos"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "type"
+              in: "query"
+            - name: "per_page"
+              in: "query"
+          operations:
+            - name: "list-org-repos"
+              method: "GET"
+              label: "List Org Repos"
+              outputParameters:
+                - name: "items"
+                  type: "array"
+                  value: "$"
+
+        - name: "repo-contributors"
+          label: "Repository Contributors"
+          description: "List contributors for a repository with commit counts"
+          path: "/repos/{{org}}/{{repo}}/contributors"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "repo"
+              in: "path"
+            - name: "per_page"
+              in: "query"
+          operations:
+            - name: "list-repo-contributors"
+              method: "GET"
+              label: "List Contributors"
+              outputParameters:
+                - name: "contributors"
+                  type: "array"
+                  value: "$"
+
+        - name: "repo-commits"
+          label: "Repository Commits"
+          description: "List commits filtered by date range"
+          path: "/repos/{{org}}/{{repo}}/commits"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "repo"
+              in: "path"
+            - name: "since"
+              in: "query"
+            - name: "per_page"
+              in: "query"
+          operations:
+            - name: "list-org-commits"
+              method: "GET"
+              label: "List Commits"
+              outputParameters:
+                - name: "commits"
+                  type: "array"
+                  value: "$"

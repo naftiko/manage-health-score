@@ -1,0 +1,191 @@
+naftiko: "0.5"
+info:
+  label: "Audit Security Posture"
+  description: "Checks each repo in a GitHub org for required security and governance files (SECURITY.md, LICENSE, CODEOWNERS, CODE_OF_CONDUCT.md, CONTRIBUTING.md), branch protection, and Dependabot status. Maps to Health Score Pillar 4: Security & Best Practices (25%)."
+  tags:
+    - health-score
+    - security
+    - pillar-4
+  created: "2026-03-22"
+  modified: "2026-03-22"
+
+capability:
+  exposes:
+    - type: "mcp"
+      namespace: "health-score"
+      tools:
+        - name: "audit-security-posture"
+          description: "Audits a GitHub org for security best practices: checks for SECURITY.md, LICENSE, CODEOWNERS, CODE_OF_CONDUCT.md, CONTRIBUTING.md, branch protection rules, and Dependabot configuration across all repos. Use this to assess Pillar 4 of the Naftiko health score."
+          inputParameters:
+            - name: org
+              in: body
+              type: string
+          steps:
+            - name: list-repos
+              type: call
+              call: "github.list-org-repos"
+              with:
+                org: "{{org}}"
+                per_page: "100"
+                type: "public"
+            - name: check-security-md
+              type: call
+              call: "github.get-file-contents"
+              with:
+                owner: "{{org}}"
+                repos: "{{list-repos.items}}"
+                file_path: "SECURITY.md"
+            - name: check-license
+              type: call
+              call: "github.get-file-contents"
+              with:
+                owner: "{{org}}"
+                repos: "{{list-repos.items}}"
+                file_path: "LICENSE"
+            - name: check-codeowners
+              type: call
+              call: "github.get-file-contents"
+              with:
+                owner: "{{org}}"
+                repos: "{{list-repos.items}}"
+                file_path: "CODEOWNERS"
+            - name: check-coc
+              type: call
+              call: "github.get-file-contents"
+              with:
+                owner: "{{org}}"
+                repos: "{{list-repos.items}}"
+                file_path: "CODE_OF_CONDUCT.md"
+            - name: check-contributing
+              type: call
+              call: "github.get-file-contents"
+              with:
+                owner: "{{org}}"
+                repos: "{{list-repos.items}}"
+                file_path: "CONTRIBUTING.md"
+            - name: check-dependabot
+              type: call
+              call: "github.get-file-contents"
+              with:
+                owner: "{{org}}"
+                repos: "{{list-repos.items}}"
+                file_path: ".github/dependabot.yml"
+            - name: check-branch-protection
+              type: call
+              call: "github.get-branch-protection"
+              with:
+                owner: "{{org}}"
+                repos: "{{list-repos.items}}"
+                branch: "main"
+          outputParameters:
+            - name: repos_with_security_md
+              type: number
+              mapping: "{{check-security-md.found_count}}"
+            - name: repos_with_license
+              type: number
+              mapping: "{{check-license.found_count}}"
+            - name: repos_with_codeowners
+              type: number
+              mapping: "{{check-codeowners.found_count}}"
+            - name: repos_with_coc
+              type: number
+              mapping: "{{check-coc.found_count}}"
+            - name: repos_with_contributing
+              type: number
+              mapping: "{{check-contributing.found_count}}"
+            - name: repos_with_dependabot
+              type: number
+              mapping: "{{check-dependabot.found_count}}"
+            - name: repos_with_branch_protection
+              type: number
+              mapping: "{{check-branch-protection.protected_count}}"
+            - name: total_repos
+              type: number
+              mapping: "{{list-repos.items | length}}"
+            - name: missing_files
+              type: array
+              mapping: "{{aggregate_missing(check-security-md, check-license, check-codeowners, check-coc, check-contributing, check-dependabot)}}"
+            - name: pillar_score
+              type: number
+              mapping: "{{compute_pillar_4(repos_with_security_md, repos_with_license, repos_with_codeowners, repos_with_branch_protection, repos_with_dependabot, total_repos)}}"
+
+  consumes:
+    - type: "http"
+      namespace: "github"
+      baseUri: "https://api.github.com"
+      authentication:
+        type: "bearer"
+        token: "{{github_token}}"
+      inputParameters:
+        - name: "github_token"
+          in: "environment"
+        - name: "Accept"
+          in: "header"
+          value: "application/vnd.github+json"
+        - name: "X-GitHub-Api-Version"
+          in: "header"
+          value: "2022-11-28"
+      resources:
+        - name: "org-repos"
+          label: "Organization Repositories"
+          path: "/orgs/{{org}}/repos"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "type"
+              in: "query"
+            - name: "per_page"
+              in: "query"
+          operations:
+            - name: "list-org-repos"
+              method: "GET"
+              outputParameters:
+                - name: "items"
+                  type: "array"
+                  value: "$"
+
+        - name: "repo-contents"
+          label: "Repository File Contents"
+          path: "/repos/{{owner}}/{{repo}}/contents/{{file_path}}"
+          inputParameters:
+            - name: "owner"
+              in: "path"
+            - name: "repo"
+              in: "path"
+            - name: "file_path"
+              in: "path"
+          operations:
+            - name: "get-file-contents"
+              method: "GET"
+              outputParameters:
+                - name: "name"
+                  type: "string"
+                  value: "$.name"
+                - name: "sha"
+                  type: "string"
+                  value: "$.sha"
+
+        - name: "branch-protection"
+          label: "Branch Protection"
+          description: "Get branch protection rules for a repository branch"
+          path: "/repos/{{owner}}/{{repo}}/branches/{{branch}}/protection"
+          inputParameters:
+            - name: "owner"
+              in: "path"
+            - name: "repo"
+              in: "path"
+            - name: "branch"
+              in: "path"
+          operations:
+            - name: "get-branch-protection"
+              method: "GET"
+              outputParameters:
+                - name: "required_pull_request_reviews"
+                  type: "object"
+                  value: "$.required_pull_request_reviews"
+                - name: "enforce_admins"
+                  type: "boolean"
+                  value: "$.enforce_admins.enabled"
+                - name: "required_status_checks"
+                  type: "object"
+                  value: "$.required_status_checks"

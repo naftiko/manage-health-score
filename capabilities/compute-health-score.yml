@@ -1,0 +1,121 @@
+naftiko: "0.5"
+info:
+  label: "Compute Health Score"
+  description: "Orchestrates all four pillar capabilities to compute a weighted overall health score (0-100) using the LFX Insights methodology: Contributors 30%, Popularity 20%, Development 25%, Security 25%."
+  tags:
+    - health-score
+    - composite
+    - orchestration
+  created: "2026-03-22"
+  modified: "2026-03-22"
+
+capability:
+  exposes:
+    - type: "mcp"
+      namespace: "health-score"
+      tools:
+        - name: "compute-health-score"
+          description: "Computes the overall Naftiko project health score (0-100) by gathering and weighting metrics from all four pillars: Contributors (30%), Popularity (20%), Development (25%), Security & Best Practices (25%). Returns pillar breakdowns, the composite score, and comparison against quarterly targets."
+          inputParameters:
+            - name: org
+              in: body
+              type: string
+              description: "GitHub organization name (e.g. naftiko)"
+            - name: quarter
+              in: body
+              type: string
+              description: "Quarter label for target comparison (e.g. Q1-2026)"
+            - name: since
+              in: body
+              type: string
+              description: "ISO date for measurement window start"
+            - name: until
+              in: body
+              type: string
+              description: "ISO date for measurement window end"
+            - name: linkedin_org_id
+              in: body
+              type: string
+          steps:
+            - name: pillar-1-contributors
+              type: call
+              call: "health-score.get-contributor-health"
+              with:
+                org: "{{org}}"
+                since: "{{since}}"
+            - name: pillar-2-popularity
+              type: call
+              call: "health-score.get-popularity-metrics"
+              with:
+                org: "{{org}}"
+                linkedin_org_id: "{{linkedin_org_id}}"
+            - name: pillar-3-development
+              type: call
+              call: "health-score.get-development-activity"
+              with:
+                org: "{{org}}"
+                since: "{{since}}"
+                until: "{{until}}"
+            - name: pillar-4-security
+              type: call
+              call: "health-score.audit-security-posture"
+              with:
+                org: "{{org}}"
+          outputParameters:
+            - name: contributors_raw
+              type: number
+              mapping: "{{pillar-1-contributors.pillar_score}}"
+            - name: contributors_weighted
+              type: number
+              mapping: "{{pillar-1-contributors.pillar_score * 0.30}}"
+            - name: popularity_raw
+              type: number
+              mapping: "{{pillar-2-popularity.pillar_score}}"
+            - name: popularity_weighted
+              type: number
+              mapping: "{{pillar-2-popularity.pillar_score * 0.20}}"
+            - name: development_raw
+              type: number
+              mapping: "{{pillar-3-development.pillar_score}}"
+            - name: development_weighted
+              type: number
+              mapping: "{{pillar-3-development.pillar_score * 0.25}}"
+            - name: security_raw
+              type: number
+              mapping: "{{pillar-4-security.pillar_score}}"
+            - name: security_weighted
+              type: number
+              mapping: "{{pillar-4-security.pillar_score * 0.25}}"
+            - name: overall_score
+              type: number
+              mapping: "{{contributors_weighted + popularity_weighted + development_weighted + security_weighted}}"
+            - name: quarter
+              type: string
+              mapping: "{{quarter}}"
+            - name: pillar_details
+              type: object
+              mapping:
+                contributors:
+                  total_contributors: "{{pillar-1-contributors.total_contributors}}"
+                  quarterly_active: "{{pillar-1-contributors.quarterly_active_contributors}}"
+                  contributing_orgs: "{{pillar-1-contributors.contributing_orgs}}"
+                popularity:
+                  total_stars: "{{pillar-2-popularity.total_stars}}"
+                  total_forks: "{{pillar-2-popularity.total_forks}}"
+                development:
+                  prs_per_month: "{{pillar-3-development.prs_merged_per_month}}"
+                  active_days: "{{pillar-3-development.active_days_last_30}}"
+                  releases: "{{pillar-3-development.release_count}}"
+                security:
+                  repos_audited: "{{pillar-4-security.total_repos}}"
+                  missing_files: "{{pillar-4-security.missing_files}}"
+
+  consumes:
+    - import: "track-contributor-health.yml"
+      as: "contributor-health"
+    - import: "track-popularity-metrics.yml"
+      as: "popularity-metrics"
+    - import: "track-development-activity.yml"
+      as: "development-activity"
+    - import: "audit-security-posture.yml"
+      as: "security-posture"

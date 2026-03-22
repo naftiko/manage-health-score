@@ -1,0 +1,205 @@
+naftiko: "0.5"
+info:
+  label: "Manage Community Engagement"
+  description: "Tracks and manages community growth signals: GitHub Discussions activity, Slack/Discord member count, LinkedIn followers, blog post count, and conference talks. Surfaces engagement gaps and recommends next community actions to boost the Popularity and Contributors pillars."
+  tags:
+    - health-score
+    - community
+    - engagement
+  created: "2026-03-22"
+  modified: "2026-03-22"
+
+capability:
+  exposes:
+    - type: "mcp"
+      namespace: "health-score"
+      tools:
+        - name: "get-community-engagement"
+          description: "Returns community engagement metrics: GitHub Discussions participants, open discussion count, LinkedIn follower count, and recent blog/article count. Use this to assess community health and plan outreach."
+          inputParameters:
+            - name: org
+              in: body
+              type: string
+            - name: linkedin_org_id
+              in: body
+              type: string
+            - name: blog_notion_database_id
+              in: body
+              type: string
+              description: "Notion database tracking blog posts and articles"
+          steps:
+            - name: list-repos
+              type: call
+              call: "github.list-org-repos"
+              with:
+                org: "{{org}}"
+                per_page: "100"
+                type: "public"
+            - name: get-discussions
+              type: call
+              call: "github.get-discussions"
+              with:
+                org: "{{org}}"
+                repos: "{{list-repos.items}}"
+            - name: get-linkedin
+              type: call
+              call: "linkedin.get-organization"
+              with:
+                org_id: "{{linkedin_org_id}}"
+            - name: get-blog-posts
+              type: call
+              call: "notion.query-database"
+              with:
+                database_id: "{{blog_notion_database_id}}"
+                filter:
+                  property: "Status"
+                  select:
+                    equals: "Published"
+          outputParameters:
+            - name: github_discussions_count
+              type: number
+              mapping: "{{get-discussions.total_count}}"
+            - name: github_discussions_participants
+              type: number
+              mapping: "{{get-discussions.unique_participants}}"
+            - name: linkedin_followers
+              type: number
+              mapping: "{{get-linkedin.staffCount}}"
+            - name: blog_posts_published
+              type: number
+              mapping: "{{get-blog-posts.results | length}}"
+            - name: repo_count
+              type: number
+              mapping: "{{list-repos.items | length}}"
+            - name: engagement_gaps
+              type: array
+              mapping: "{{identify_gaps(github_discussions_participants, linkedin_followers, blog_posts_published)}}"
+
+        - name: "create-community-issue"
+          description: "Creates a GitHub issue in the .github repo to track a community engagement action item (e.g. write a blog post, schedule a meetup talk, launch Discord)."
+          inputParameters:
+            - name: org
+              in: body
+              type: string
+            - name: action_title
+              in: body
+              type: string
+            - name: action_description
+              in: body
+              type: string
+            - name: pillar
+              in: body
+              type: string
+              description: "Which health score pillar this action targets"
+          steps:
+            - name: create-issue
+              type: call
+              call: "github.create-issue"
+              with:
+                owner: "{{org}}"
+                repo: ".github"
+                title: "[Community] {{action_title}}"
+                body: "{{action_description}}\n\nHealth Score Pillar: {{pillar}}\nCreated by: manage-community-engagement capability"
+                labels: ["community", "health-score"]
+          outputParameters:
+            - name: issue_url
+              type: string
+              mapping: "{{create-issue.html_url}}"
+            - name: issue_number
+              type: number
+              mapping: "{{create-issue.number}}"
+
+  consumes:
+    - type: "http"
+      namespace: "github"
+      baseUri: "https://api.github.com"
+      authentication:
+        type: "bearer"
+        token: "{{github_token}}"
+      inputParameters:
+        - name: "github_token"
+          in: "environment"
+        - name: "Accept"
+          in: "header"
+          value: "application/vnd.github+json"
+        - name: "X-GitHub-Api-Version"
+          in: "header"
+          value: "2022-11-28"
+      resources:
+        - name: "org-repos"
+          label: "Organization Repositories"
+          path: "/orgs/{{org}}/repos"
+          inputParameters:
+            - name: "org"
+              in: "path"
+            - name: "type"
+              in: "query"
+            - name: "per_page"
+              in: "query"
+          operations:
+            - name: "list-org-repos"
+              method: "GET"
+              outputParameters:
+                - name: "items"
+                  type: "array"
+                  value: "$"
+
+        - name: "repo-issues"
+          label: "Repository Issues"
+          path: "/repos/{{owner}}/{{repo}}/issues"
+          inputParameters:
+            - name: "owner"
+              in: "path"
+            - name: "repo"
+              in: "path"
+          operations:
+            - name: "create-issue"
+              method: "POST"
+              inputParameters:
+                - name: "title"
+                  in: "body"
+                - name: "body"
+                  in: "body"
+                - name: "labels"
+                  in: "body"
+              body:
+                type: "json"
+                data:
+                  title: "{{title}}"
+                  body: "{{body}}"
+                  labels: "{{labels}}"
+              outputParameters:
+                - name: "number"
+                  type: "number"
+                  value: "$.number"
+                - name: "html_url"
+                  type: "string"
+                  value: "$.html_url"
+
+        - name: "graphql"
+          label: "GitHub GraphQL"
+          description: "GraphQL endpoint for Discussions queries"
+          path: "/graphql"
+          operations:
+            - name: "get-discussions"
+              method: "POST"
+              label: "Get Discussions"
+              inputParameters:
+                - name: "query"
+                  in: "body"
+              body:
+                type: "json"
+                data:
+                  query: "query { repository(owner: \"{{org}}\", name: \"{{repo}}\") { discussions(first: 100) { totalCount nodes { author { login } } } } }"
+              outputParameters:
+                - name: "total_count"
+                  type: "number"
+                  value: "$.data.repository.discussions.totalCount"
+                - name: "participants"
+                  type: "array"
+                  value: "$.data.repository.discussions.nodes"
+
+    - import: "shared-linkedin.yml"
+      as: "linkedin"
+    - import: "shared-notion.yml"
+      as: "notion"

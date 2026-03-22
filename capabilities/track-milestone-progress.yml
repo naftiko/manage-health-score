@@ -1,0 +1,108 @@
+naftiko: "0.5"
+info:
+  label: "Track Milestone Progress"
+  description: "Compares current health score metrics against quarterly targets from the Naftiko milestone roadmap. Reports which targets are met, at risk, or missed across all four pillars and the CNCF Sandbox readiness checklist."
+  tags:
+    - health-score
+    - milestones
+    - roadmap
+  created: "2026-03-22"
+  modified: "2026-03-22"
+
+capability:
+  exposes:
+    - type: "mcp"
+      namespace: "health-score"
+      tools:
+        - name: "track-milestone-progress"
+          description: "Compares live GitHub and community metrics against the quarterly milestone targets defined in the Naftiko health score roadmap. Returns a status for each metric (met, at-risk, missed) and highlights the most impactful next actions."
+          inputParameters:
+            - name: org
+              in: body
+              type: string
+            - name: quarter
+              in: body
+              type: string
+              description: "Target quarter to compare against (e.g. Q2-2026)"
+            - name: since
+              in: body
+              type: string
+            - name: until
+              in: body
+              type: string
+            - name: linkedin_org_id
+              in: body
+              type: string
+            - name: notion_database_id
+              in: body
+              type: string
+              description: "Notion database storing milestone targets"
+          steps:
+            - name: compute-score
+              type: call
+              call: "health-score.compute-health-score"
+              with:
+                org: "{{org}}"
+                quarter: "{{quarter}}"
+                since: "{{since}}"
+                until: "{{until}}"
+                linkedin_org_id: "{{linkedin_org_id}}"
+            - name: get-targets
+              type: call
+              call: "notion.query-database"
+              with:
+                database_id: "{{notion_database_id}}"
+                filter:
+                  property: "Quarter"
+                  select:
+                    equals: "{{quarter}}"
+          outputParameters:
+            - name: quarter
+              type: string
+              mapping: "{{quarter}}"
+            - name: overall_score
+              type: number
+              mapping: "{{compute-score.overall_score}}"
+            - name: popularity_progress
+              type: object
+              mapping:
+                stars_current: "{{compute-score.pillar_details.popularity.total_stars}}"
+                stars_target: "{{get-targets.results[0].properties.Stars_Target.number}}"
+                stars_status: "{{compute_status(compute-score.pillar_details.popularity.total_stars, get-targets.results[0].properties.Stars_Target.number)}}"
+                forks_current: "{{compute-score.pillar_details.popularity.total_forks}}"
+                forks_target: "{{get-targets.results[0].properties.Forks_Target.number}}"
+                forks_status: "{{compute_status(compute-score.pillar_details.popularity.total_forks, get-targets.results[0].properties.Forks_Target.number)}}"
+            - name: contributors_progress
+              type: object
+              mapping:
+                total_current: "{{compute-score.pillar_details.contributors.total_contributors}}"
+                total_target: "{{get-targets.results[0].properties.Contributors_Target.number}}"
+                total_status: "{{compute_status(compute-score.pillar_details.contributors.total_contributors, get-targets.results[0].properties.Contributors_Target.number)}}"
+                orgs_current: "{{compute-score.pillar_details.contributors.contributing_orgs}}"
+                orgs_target: "{{get-targets.results[0].properties.Orgs_Target.number}}"
+                orgs_status: "{{compute_status(compute-score.pillar_details.contributors.contributing_orgs, get-targets.results[0].properties.Orgs_Target.number)}}"
+            - name: development_progress
+              type: object
+              mapping:
+                prs_per_month_current: "{{compute-score.pillar_details.development.prs_per_month}}"
+                releases_current: "{{compute-score.pillar_details.development.releases}}"
+                active_days_current: "{{compute-score.pillar_details.development.active_days}}"
+            - name: security_progress
+              type: object
+              mapping:
+                missing_files: "{{compute-score.pillar_details.security.missing_files}}"
+                repos_audited: "{{compute-score.pillar_details.security.repos_audited}}"
+            - name: cncf_sandbox_readiness
+              type: object
+              mapping:
+                license: "{{compute-score.pillar_details.security.missing_files | none_missing('LICENSE')}}"
+                code_of_conduct: "{{compute-score.pillar_details.security.missing_files | none_missing('CODE_OF_CONDUCT.md')}}"
+                security_md: "{{compute-score.pillar_details.security.missing_files | none_missing('SECURITY.md')}}"
+                contributing: "{{compute-score.pillar_details.security.missing_files | none_missing('CONTRIBUTING.md')}}"
+                multi_maintainer: "{{compute-score.pillar_details.contributors.contributing_orgs >= 2}}"
+
+  consumes:
+    - import: "compute-health-score.yml"
+      as: "health-score-compute"
+    - import: "shared-notion.yml"
+      as: "notion"
